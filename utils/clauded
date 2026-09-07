@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session="claude-$(date +%Y%m%d-%H%M%S)-$RANDOM"
+cmd=(env CLAUDE_CODE_TMUX_TRUECOLOR=1 claude --chrome --dangerously-skip-permissions "$@")
+
+printf -v quoted_cmd '%q ' "${cmd[@]}"
+shell_cmd="exec ${quoted_cmd% }"
+
+if [[ -n "${TMUX:-}" ]]; then
+  tmux new-session -d -s "$session" "$shell_cmd"
+  tmux switch-client -t "$session"
+else
+  tmux new-session -s "$session" "$shell_cmd"
+fi

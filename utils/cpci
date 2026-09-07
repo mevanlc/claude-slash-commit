@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    printf 'usage: cpci (-a|-s|-k) [-y] [-p] [-.] [-l|-m|-h|-x] [--model=<model>] [instructions...] [-- copilot_args...]\n' >&2
+}
+
+help() {
+    usage 2>&1
+    cat <<'EOF'
+
+Flags:
+  -a      Commit all changes (use the 'commit' skill with arguments --all).
+  -s      Commit only staged changes (use the 'commit' skill with arguments --staged).
+  -k      Ask interactively what to commit (use the 'commit' skill with arguments --ask).
+  -y      Preconfirm the commit gate; valid only with -a or -s.
+  -p      Push the branch after the commit lands (mode suffix -push).
+  -.      Use the 'gdf-commit' skill instead of 'commit'.
+  -l      Use low reasoning effort; repeat for minimal, or three times for none.
+  -m      Use medium reasoning effort.
+  -h      Use high reasoning effort.
+  -x      Use xhigh reasoning effort; repeat for max.
+  --model=<model>
+          Select the Copilot model (default: gpt-5.6-terra).
+  --      Pass all remaining arguments directly to copilot.
+  --help  Show this help.
+
+Bare (non-flag) arguments are appended to the commit skill arguments as additional
+instructions, e.g. `cpci -a use imperative mood`.
+EOF
+}
+
+mode=
+skill=commit
+preconfirmed=0
+push=0
+effort=
+effort_flag=
+effort_count=0
+model=gpt-5.6-terra
+instructions=()
+copilot_args=()
+
+while (($#)); do
+    case "$1" in
+        -a)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=all
+            ;;
+        -s)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=staged
+            ;;
+        -k)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=ask
+            ;;
+        -.)
+            skill=gdf-commit
+            ;;
+        -y)
+            preconfirmed=1
+            ;;
+        -p)
+            push=1
+            ;;
+        -l)
+            if [[ -n "$effort_flag" && "$effort_flag" != l ]]; then usage; exit 2; fi
+            effort_flag=l
+            ((effort_count += 1))
+            case "$effort_count" in
+                1) effort=low ;;
+                2) effort=minimal ;;
+                3) effort=none ;;
+                *) usage; exit 2 ;;
+            esac
+            ;;
+        -m)
+            if [[ -n "$effort_flag" ]]; then usage; exit 2; fi
+            effort_flag=m
+            effort=medium
+            ;;
+        -h)
+            if [[ -n "$effort_flag" ]]; then usage; exit 2; fi
+            effort_flag=h
+            effort=high
+            ;;
+        -x)
+            if [[ -n "$effort_flag" && "$effort_flag" != x ]]; then usage; exit 2; fi
+            effort_flag=x
+            ((effort_count += 1))
+            case "$effort_count" in
+                1) effort=xhigh ;;
+                2) effort=max ;;
+                *) usage; exit 2 ;;
+            esac
+            ;;
+        --model=*)
+            model=${1#--model=}
+            if [[ -z "$model" ]]; then usage; exit 2; fi
+            ;;
+        --help)
+            help
+            exit 0
+            ;;
+        --)
+            shift
+            copilot_args=("$@")
+            break
+            ;;
+        -*)
+            usage
+            exit 2
+            ;;
+        *)
+            instructions+=("$1")
+            ;;
+    esac
+    shift
+done
+
+if [[ -z "$mode" ]]; then
+    usage
+    exit 2
+fi
+
+if [[ "$preconfirmed" -eq 1 ]]; then
+    if [[ "$mode" == ask ]]; then
+        usage
+        exit 2
+    fi
+    mode+="-yes"
+fi
+
+if [[ "$push" -eq 1 ]]; then
+    mode+="-push"
+fi
+
+commit_tool_arguments="--$mode"
+if ((${#instructions[@]})); then
+    commit_tool_arguments+=" ${instructions[*]}"
+fi
+
+args=(--yolo "--model=$model")
+if [[ -n "$effort" ]]; then
+    args+=(--effort "$effort")
+fi
+args+=(-i "use the '${skill}' skill with arguments ${commit_tool_arguments}")
+args+=("${copilot_args[@]}")
+
+exec "${CPCI_COPILOT_BIN:-copilotd}" "${args[@]}"

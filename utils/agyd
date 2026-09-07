@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session="agy-$(date +%Y%m%d-%H%M%S)-$RANDOM"
+
+if ! agy_bin="$(type -P agy)"; then
+  printf 'agyd: agy not found on PATH\n' >&2
+  exit 127
+fi
+
+cmd=("$agy_bin" --dangerously-skip-permissions "$@")
+
+printf -v quoted_cmd '%q ' "${cmd[@]}"
+shell_cmd="exec ${quoted_cmd% }"
+
+if [[ -n "${TMUX:-}" ]]; then
+  tmux new-session -d -s "$session" "$shell_cmd"
+  tmux switch-client -t "$session"
+else
+  tmux new-session -s "$session" "$shell_cmd"
+fi

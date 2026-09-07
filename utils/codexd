@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session="codex-$(date +%Y%m%d-%H%M%S)-$RANDOM"
+codex_args=()
+no_mcp=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --x-no-mcp)
+      no_mcp=true
+      ;;
+    *)
+      codex_args+=("$arg")
+      ;;
+  esac
+done
+
+if ! codex_bin="$(type -P codex)"; then
+  printf 'codexd: codex not found on PATH\n' >&2
+  exit 127
+fi
+
+cmd=(env RUST_BACKTRACE=1 "$codex_bin" --yolo --config tui.notifications=false)
+
+if "$no_mcp"; then
+  cmd+=(--disable plugins)
+  while IFS= read -r server_name; do
+    cmd+=(-c "mcp_servers.${server_name}.enabled=false")
+  done < <("$codex_bin" --disable plugins mcp list | awk 'NF && $1 != "Name" { print $1 }')
+fi
+
+cmd+=("${codex_args[@]}")
+
+printf -v quoted_cmd '%q ' "${cmd[@]}"
+shell_cmd="exec ${quoted_cmd% }"
+
+if [[ -n "${TMUX:-}" ]]; then
+  tmux new-session -d -s "$session" "$shell_cmd"
+  tmux switch-client -t "$session"
+else
+  tmux new-session -s "$session" "$shell_cmd"
+fi

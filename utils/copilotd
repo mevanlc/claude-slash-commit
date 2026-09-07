@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session="copilot-$(date +%Y%m%d-%H%M%S)-$RANDOM"
+
+if ! copilot_bin="$(type -P copilot)"; then
+  printf 'copilod: copilot not found on PATH\n' >&2
+  exit 127
+fi
+
+cmd=("$copilot_bin" --yolo "$@")
+
+printf -v quoted_cmd '%q ' "${cmd[@]}"
+shell_cmd="exec ${quoted_cmd% }"
+
+if [[ -n "${TMUX:-}" ]]; then
+  tmux new-session -d -s "$session" "$shell_cmd"
+  tmux switch-client -t "$session"
+else
+  tmux new-session -s "$session" "$shell_cmd"
+fi

@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    printf 'usage: clci (-a|-s|-k) [-y] [-p] [-.] [-l|-m|-h|-x|-X] [-O|-F|-S|-H] [-f] [instructions...] [-- claude_args...]\n' >&2
+}
+
+help() {
+    usage 2>&1
+    cat <<'EOF'
+
+Flags:
+  -a      Commit all changes (/commit --all).
+  -s      Commit only staged changes (/commit --staged).
+  -k      Ask interactively what to commit (/commit --ask).
+  -y      Preconfirm the commit gate; valid only with -a or -s.
+  -p      Push the branch after the commit lands (mode suffix -push).
+  -.      Use /gdf-commit instead of /commit.
+  -l      Use low model reasoning effort.
+  -m      Use medium model reasoning effort.
+  -h      Use high model reasoning effort (default).
+  -x      Use xhigh model reasoning effort.
+  -X      Use max model reasoning effort.
+  -O      Use the Opus model (default).
+  -F      Use the Fable model.
+  -S      Use the Sonnet model.
+  -H      Use the Haiku model.
+  -f      Use fast mode; valid only with the Opus model.
+  --      Pass all remaining arguments directly to claude.
+  --help  Show this help.
+
+Bare (non-flag) arguments are appended to the commit command as additional
+instructions, e.g. `clci -a use imperative mood`.
+EOF
+}
+
+mode=
+commit_command=commit
+effort=high
+effort_set=0
+model=opus
+model_set=0
+fast=0
+preconfirmed=0
+push=0
+instructions=()
+claude_args=()
+
+while (($#)); do
+    case "$1" in
+        -a)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=all
+            ;;
+        -s)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=staged
+            ;;
+        -k)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=ask
+            ;;
+        -.)
+            commit_command=gdf-commit
+            ;;
+        -l)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=low
+            effort_set=1
+            ;;
+        -m)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=medium
+            effort_set=1
+            ;;
+        -h)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=high
+            effort_set=1
+            ;;
+        -x)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=xhigh
+            effort_set=1
+            ;;
+        -X)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=max
+            effort_set=1
+            ;;
+        -O)
+            if [[ "$model_set" -eq 1 ]]; then usage; exit 2; fi
+            model=opus
+            model_set=1
+            ;;
+        -F)
+            if [[ "$model_set" -eq 1 ]]; then usage; exit 2; fi
+            model=fable
+            model_set=1
+            ;;
+        -S)
+            if [[ "$model_set" -eq 1 ]]; then usage; exit 2; fi
+            model=sonnet
+            model_set=1
+            ;;
+        -H)
+            if [[ "$model_set" -eq 1 ]]; then usage; exit 2; fi
+            model=haiku
+            model_set=1
+            ;;
+        -f)
+            fast=1
+            ;;
+        -y)
+            preconfirmed=1
+            ;;
+        -p)
+            push=1
+            ;;
+        --help)
+            help
+            exit 0
+            ;;
+        --)
+            shift
+            claude_args=("$@")
+            break
+            ;;
+        -*)
+            usage
+            exit 2
+            ;;
+        *)
+            instructions+=("$1")
+            ;;
+    esac
+    shift
+done
+
+if [[ -z "$mode" ]]; then
+    usage
+    exit 2
+fi
+
+if [[ "$preconfirmed" -eq 1 ]]; then
+    if [[ "$mode" == ask ]]; then
+        usage
+        exit 2
+    fi
+    mode+="-yes"
+fi
+
+if [[ "$push" -eq 1 ]]; then
+    mode+="-push"
+fi
+
+settings='{"autoMemoryEnabled":false}'
+if [[ "$fast" -eq 1 ]]; then
+    if [[ "$model" != opus ]]; then usage; exit 2; fi
+    settings='{"autoMemoryEnabled":false,"fastMode":true}'
+fi
+
+prompt="/${commit_command} --$mode"
+if ((${#instructions[@]})); then
+    prompt+=" ${instructions[*]}"
+fi
+
+args=(--strict-mcp-config --model "$model" --effort "$effort" --settings "$settings")
+args+=("$prompt")
+args+=("${claude_args[@]}")
+
+exec "${CLCI_CLAUDE_BIN:-clauded}" "${args[@]}"

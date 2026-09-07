@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    printf 'usage: agci (-a|-s|-k) [-y] [-p] [-.] [-l|-m|-h] [instructions...] [-- agy_args...]\n' >&2
+}
+
+help() {
+    usage 2>&1
+    cat <<'EOF'
+
+Flags:
+  -a      Commit all changes (use the 'commit' skill with arguments --all).
+  -s      Commit only staged changes (use the 'commit' skill with arguments --staged).
+  -k      Ask interactively what to commit (use the 'commit' skill with arguments --ask).
+  -y      Preconfirm the commit gate; valid only with -a or -s.
+  -p      Push the branch after the commit lands (mode suffix -push).
+  -.      Use the 'gdf-commit' skill instead of 'commit'.
+  -l      Use low reasoning effort.
+  -m      Use medium reasoning effort (default).
+  -h      Use high reasoning effort.
+  --      Pass all remaining arguments directly to agy.
+  --help  Show this help.
+
+Bare (non-flag) arguments are appended to the commit skill arguments as additional
+instructions, e.g. `agci -a use imperative mood`.
+EOF
+}
+
+mode=
+skill=commit
+preconfirmed=0
+push=0
+effort=medium
+effort_set=0
+instructions=()
+agy_args=()
+
+while (($#)); do
+    case "$1" in
+        -a)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=all
+            ;;
+        -s)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=staged
+            ;;
+        -k)
+            if [[ -n "$mode" ]]; then usage; exit 2; fi
+            mode=ask
+            ;;
+        -.)
+            skill=gdf-commit
+            ;;
+        -y)
+            preconfirmed=1
+            ;;
+        -p)
+            push=1
+            ;;
+        -l)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=low
+            effort_set=1
+            ;;
+        -m)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=medium
+            effort_set=1
+            ;;
+        -h)
+            if [[ "$effort_set" -eq 1 ]]; then usage; exit 2; fi
+            effort=high
+            effort_set=1
+            ;;
+        --help)
+            help
+            exit 0
+            ;;
+        --)
+            shift
+            agy_args=("$@")
+            break
+            ;;
+        -*)
+            usage
+            exit 2
+            ;;
+        *)
+            instructions+=("$1")
+            ;;
+    esac
+    shift
+done
+
+if [[ -z "$mode" ]]; then
+    usage
+    exit 2
+fi
+
+if [[ "$preconfirmed" -eq 1 ]]; then
+    if [[ "$mode" == ask ]]; then
+        usage
+        exit 2
+    fi
+    mode+="-yes"
+fi
+
+if [[ "$push" -eq 1 ]]; then
+    mode+="-push"
+fi
+
+commit_tool_arguments="--$mode"
+if ((${#instructions[@]})); then
+    commit_tool_arguments+=" ${instructions[*]}"
+fi
+
+args=(--dangerously-skip-permissions --add-dir "$PWD" --prompt-interactive "use the '${skill}' skill with arguments ${commit_tool_arguments}")
+args+=(--effort "$effort")
+args+=("${agy_args[@]}")
+
+exec "${AGCI_AGY_BIN:-agyd}" "${args[@]}"
